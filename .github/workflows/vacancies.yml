@@ -1,0 +1,33 @@
+name: "🔥 Вакансии (3x день)"
+
+on:
+  schedule:
+    - cron: '0 5 * * *'    # 08:00 MSK
+    - cron: '0 10 * * *'   # 13:00 MSK
+    - cron: '0 15 * * *'   # 18:00 MSK
+  workflow_dispatch:        # Manual trigger
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Post vacancies
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: python poster.py
+      
+      - name: Commit tracking
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add posted_vacancies.json
+          git diff --staged --quiet || git commit -m "Update vacancy tracking [skip ci]"
+          git push

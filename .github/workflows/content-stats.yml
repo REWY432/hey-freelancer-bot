@@ -1,0 +1,26 @@
+name: "📊 Статистика (Пн)"
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'    # 12:00 MSK понедельник
+  workflow_dispatch:
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - name: Post
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: python content.py stats
+      - name: Commit
+        run: |
+          git config user.name "gh-actions"
+          git config user.email "bot@gha.local"
+          git add content_index.json
+          git diff --staged --quiet || git commit -m "stats [skip ci]"
+          git push
