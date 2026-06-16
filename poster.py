@@ -3,7 +3,7 @@ GitHub Actions vacancy poster for @hey_freelancer
 Scrapes FL.ru, Freelance.ru, Kwork → filters → posts top 3 to Telegram.
 No external API dependencies. State tracked via posted_vacancies.json in repo.
 """
-import urllib.request, json, re, os, sys, io
+import urllib.request, urllib.parse, json, re, os, sys, io
 from datetime import datetime, timezone, timedelta
 from html import unescape
 
@@ -121,6 +121,82 @@ def parse_kw(html):
     return projects
 
 
+def parse_hh():
+    """Search hh.ru API for remote freelance/IT/design vacancies."""
+    projects = []
+    queries = [
+        "фриланс OR удаленно OR проектная работа",
+        "дизайн OR разработка OR копирайтер OR smm",
+        "python OR javascript OR php OR 1с OR seo"
+    ]
+    seen_ids = set()
+    headers = {"User-Agent": "HeyFreelancerBot/1.0 (hey_freelancer@telegram.org)"}
+    
+    for query in queries:
+        try:
+            params = urllib.parse.urlencode({
+                "text": query,
+                "area": "113",       # Russia
+                "per_page": "20",
+                "order_by": "publication_time",
+                "schedule": "remote",
+                "only_with_salary": "true",
+            })
+            url = f"https://api.hh.ru/vacancies?{params}"
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=15) as r:
+                data = json.loads(r.read())
+            
+            for item in data.get("items", []):
+                vid = item.get("id", "")
+                if vid in seen_ids:
+                    continue
+                seen_ids.add(vid)
+                
+                name = item.get("name", "")
+                employer = item.get("employer", {}).get("name", "")
+                salary = item.get("salary")
+                link = item.get("alternate_url", "")
+                area = item.get("area", {}).get("name", "")
+                snippet = item.get("snippet", {})
+                
+                # Build description from snippets
+                req_text = (snippet.get("requirement") or "").replace("<highlighttext>", "").replace("</highlighttext>", "")
+                resp_text = (snippet.get("responsibility") or "").replace("<highlighttext>", "").replace("</highlighttext>", "")
+                desc = f"{req_text} {resp_text}".strip()[:200]
+                
+                # Build budget from salary
+                budget = "договорная"
+                if salary:
+                    sal_from = salary.get("from")
+                    sal_to = salary.get("to")
+                    currency = salary.get("currency", "").upper()
+                    if sal_from and sal_to:
+                        budget = f"{sal_from:,} – {sal_to:,} {currency}".replace(",", " ")
+                    elif sal_from:
+                        budget = f"от {sal_from:,} {currency}".replace(",", " ")
+                    elif sal_to:
+                        budget = f"до {sal_to:,} {currency}".replace(",", " ")
+                
+                title = f"{name}"
+                if employer:
+                    title = f"{name} ({employer})"
+                
+                projects.append({
+                    "id": f"hh{vid}",
+                    "title": title,
+                    "link": link,
+                    "budget": budget,
+                    "description": f"{area}. {desc}" if area else desc,
+                    "source": "hh.ru"
+                })
+        except Exception as e:
+            print(f"  ⚠️ hh.ru query '{query[:40]}...': {e}")
+            continue
+    
+    return projects
+
+
 def is_relevant(p):
     text = (p["title"] + " " + p["description"]).lower()
     for kw in EXCLUDE_KW:
@@ -154,6 +230,7 @@ def quality_score(p):
     if p.get("responses",0) > 10: score += 5
     if len(p.get("title","")) > 30: score += 5
     if p.get("source") == "Kwork": score += 3
+    if p.get("source") == "hh.ru": score += 2  # Official company listings
     return score
 
 
@@ -194,7 +271,9 @@ def format_post(projects, today_str):
         if budget and budget not in ("договорная","по договоренности","по результатам собеседования"):
             lines.append(f"   💰 {budget}")
         if desc: lines.append(f"   📝 {desc}")
-        lines.append(f"   🔗 {p['link']}")
+        source = p.get('source', '')
+        source_label = {"FL.ru": "🔹 FL.ru", "Freelance.ru": "🔹 Freelance.ru", "Kwork": "🔹 Kwork", "hh.ru": "🔹 hh.ru"}.get(source, f"🔹 {source}")
+        lines.append(f"   🔗 {p['link']}  |  {source_label}")
         lines.append("")
     lines.append(" ".join([f"{emoji_react[i]} — {i+1}" for i in range(len(projects))]))
     lines.append("")
@@ -212,18 +291,18 @@ def main():
     # Fetch all sources
     all_projects = []
     sources = [
-        ("https://www.fl.ru/projects/", parse_fl),
-        ("https://freelance.ru/task", parse_fr),
-        ("https://kwork.ru/projects", parse_kw),
+        ("www.fl.ru", lambda: parse_fl(fetch_html("https://www.fl.ru/projects/"))),
+        ("freelance.ru", lambda: parse_fr(fetch_html("https://freelance.ru/task"))),
+        ("kwork.ru", lambda: parse_kw(fetch_html("https://kwork.ru/projects"))),
+        ("hh.ru", parse_hh),
     ]
-    for url, parser in sources:
+    for name, fetcher in sources:
         try:
-            html = fetch_html(url)
-            projects = parser(html)
+            projects = fetcher()
             all_projects.extend(projects)
-            print(f"  {url.split('/')[2]}: {len(projects)}")
+            print(f"  {name}: {len(projects)}")
         except Exception as e:
-            print(f"  ⚠️ {url}: {e}")
+            print(f"  ⚠️ {name}: {e}")
 
     relevant = [p for p in all_projects if is_relevant(p)]
     tracking = load_tracking()
