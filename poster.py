@@ -121,77 +121,86 @@ def parse_kw(html):
     return projects
 
 
-def parse_hh():
-    """Search hh.ru API for remote freelance/IT/design vacancies."""
+def parse_habr():
+    """Search Habr Career API for remote IT vacancies."""
     projects = []
-    queries = [
-        "фриланс OR удаленно OR проектная работа",
-        "дизайн OR разработка OR копирайтер OR smm",
-        "python OR javascript OR php OR 1с OR seo"
-    ]
     seen_ids = set()
     headers = {"User-Agent": "HeyFreelancerBot/1.0 (hey_freelancer@telegram.org)"}
     
-    for query in queries:
+    skills_queries = [
+        "",
+        "&skills[]=python&skills[]=javascript&skills[]=php",
+        "&skills[]=design&skills[]=seo&skills[]=marketing",
+    ]
+    
+    for sq in skills_queries:
         try:
-            params = urllib.parse.urlencode({
-                "text": query,
-                "area": "113",       # Russia
-                "per_page": "20",
-                "order_by": "publication_time",
-                "schedule": "remote",
-                "only_with_salary": "true",
-            })
-            url = f"https://api.hh.ru/vacancies?{params}"
+            url = f"https://career.habr.com/api/frontend/vacancies?page=0&per_page=15&sort=date&divisions[]=remote{sq}"
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=15) as r:
                 data = json.loads(r.read())
             
-            for item in data.get("items", []):
+            for item in data.get("list", []):
                 vid = item.get("id", "")
                 if vid in seen_ids:
                     continue
                 seen_ids.add(vid)
                 
-                name = item.get("name", "")
-                employer = item.get("employer", {}).get("name", "")
-                salary = item.get("salary")
-                link = item.get("alternate_url", "")
-                area = item.get("area", {}).get("name", "")
-                snippet = item.get("snippet", {})
+                title = item.get("title", "")
+                company = item.get("company", {}).get("title", "")
+                href = item.get("href", "")
+                link = f"https://career.habr.com{href}"
                 
-                # Build description from snippets
-                req_text = (snippet.get("requirement") or "").replace("<highlighttext>", "").replace("</highlighttext>", "")
-                resp_text = (snippet.get("responsibility") or "").replace("<highlighttext>", "").replace("</highlighttext>", "")
-                desc = f"{req_text} {resp_text}".strip()[:200]
-                
-                # Build budget from salary
-                budget = "договорная"
-                if salary:
+                # Salary
+                salary = item.get("salary", {})
+                predicted = item.get("predictedSalary", {})
+                budget = salary.get("formatted") or predicted.get("formatted") or ""
+                if not budget:
                     sal_from = salary.get("from")
                     sal_to = salary.get("to")
-                    currency = salary.get("currency", "").upper()
                     if sal_from and sal_to:
-                        budget = f"{sal_from:,} – {sal_to:,} {currency}".replace(",", " ")
+                        budget = f"{sal_from:,} – {sal_to:,} ₽".replace(",", " ")
                     elif sal_from:
-                        budget = f"от {sal_from:,} {currency}".replace(",", " ")
+                        budget = f"от {sal_from:,} ₽".replace(",", " ")
                     elif sal_to:
-                        budget = f"до {sal_to:,} {currency}".replace(",", " ")
+                        budget = f"до {sal_to:,} ₽".replace(",", " ")
+                    if not budget:
+                        p_from = predicted.get("from")
+                        p_to = predicted.get("to")
+                        if p_from and p_to:
+                            budget = f"~{p_from:,} – {p_to:,} ₽".replace(",", " ")
                 
-                title = f"{name}"
-                if employer:
-                    title = f"{name} ({employer})"
+                if not budget:
+                    budget = "договорная"
+                
+                # Description from skills and divisions
+                skills = [s["title"] for s in item.get("skills", [])[:5]]
+                divisions = [d["title"] for d in item.get("divisions", [])[:2]]
+                locs = [l["title"] for l in item.get("locations", [])[:1]]
+                
+                desc_parts = []
+                if divisions:
+                    desc_parts.append(", ".join(divisions))
+                if skills:
+                    desc_parts.append(", ".join(skills))
+                if locs:
+                    desc_parts.append(f"📍 {', '.join(locs)}")
+                desc = ". ".join(desc_parts)[:200]
+                
+                full_title = title
+                if company:
+                    full_title = f"{title} ({company})"
                 
                 projects.append({
-                    "id": f"hh{vid}",
-                    "title": title,
+                    "id": f"habr{vid}",
+                    "title": full_title,
                     "link": link,
                     "budget": budget,
-                    "description": f"{area}. {desc}" if area else desc,
-                    "source": "hh.ru"
+                    "description": desc,
+                    "source": "Habr Career"
                 })
         except Exception as e:
-            print(f"  ⚠️ hh.ru query '{query[:40]}...': {e}")
+            print(f"  ⚠️ Habr Career: {e}")
             continue
     
     return projects
@@ -230,7 +239,7 @@ def quality_score(p):
     if p.get("responses",0) > 10: score += 5
     if len(p.get("title","")) > 30: score += 5
     if p.get("source") == "Kwork": score += 3
-    if p.get("source") == "hh.ru": score += 2  # Official company listings
+    if p.get("source") == "Habr Career": score += 2  # Direct employer listings
     return score
 
 
@@ -272,7 +281,7 @@ def format_post(projects, today_str):
             lines.append(f"   💰 {budget}")
         if desc: lines.append(f"   📝 {desc}")
         source = p.get('source', '')
-        source_label = {"FL.ru": "🔹 FL.ru", "Freelance.ru": "🔹 Freelance.ru", "Kwork": "🔹 Kwork", "hh.ru": "🔹 hh.ru"}.get(source, f"🔹 {source}")
+        source_label = {"FL.ru": "🔹 FL.ru", "Freelance.ru": "🔹 Freelance.ru", "Kwork": "🔹 Kwork", "Habr Career": "🔹 Habr Career"}.get(source, f"🔹 {source}")
         lines.append(f"   🔗 {p['link']}  |  {source_label}")
         lines.append("")
     lines.append(" ".join([f"{emoji_react[i]} — {i+1}" for i in range(len(projects))]))
@@ -294,7 +303,7 @@ def main():
         ("www.fl.ru", lambda: parse_fl(fetch_html("https://www.fl.ru/projects/"))),
         ("freelance.ru", lambda: parse_fr(fetch_html("https://freelance.ru/task"))),
         ("kwork.ru", lambda: parse_kw(fetch_html("https://kwork.ru/projects"))),
-        ("hh.ru", parse_hh),
+        ("habr.com/career", parse_habr),
     ]
     for name, fetcher in sources:
         try:
