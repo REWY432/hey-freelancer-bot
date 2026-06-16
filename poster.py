@@ -146,14 +146,14 @@ def parse_habr():
                     continue
                 seen_ids.add(vid)
                 
-                title = item.get("title", "")
-                company = item.get("company", {}).get("title", "")
-                href = item.get("href", "")
+                title = item.get("title", "") or ""
+                company = (item.get("company") or {}).get("title", "") or ""
+                href = item.get("href", "") or ""
                 link = f"https://career.habr.com{href}"
                 
                 # Salary
-                salary = item.get("salary", {})
-                predicted = item.get("predictedSalary", {})
+                salary = item.get("salary") or {}
+                predicted = item.get("predictedSalary") or {}
                 budget = salary.get("formatted") or predicted.get("formatted") or ""
                 if not budget:
                     sal_from = salary.get("from")
@@ -174,9 +174,9 @@ def parse_habr():
                     budget = "договорная"
                 
                 # Description from skills and divisions
-                skills = [s["title"] for s in item.get("skills", [])[:5]]
-                divisions = [d["title"] for d in item.get("divisions", [])[:2]]
-                locs = [l["title"] for l in item.get("locations", [])[:1]]
+                skills = [s.get("title","") for s in (item.get("skills") or [])[:5] if s]
+                divisions = [d.get("title","") for d in (item.get("divisions") or [])[:2] if d]
+                locs = [l.get("title","") for l in (item.get("locations") or [])[:1] if l]
                 
                 desc_parts = []
                 if divisions:
