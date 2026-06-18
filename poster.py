@@ -268,17 +268,19 @@ def tg_send(text):
 
 # --- Category detection ---
 CATEGORY_RULES = [
-    ("Дизайн", ["дизайн", "figma", "photoshop", "логотип", "иллюстрац", "баннер", "креатив", "фирменный стиль", "айдентика", "брендинг", "полиграф", "верстк", "ретуш", "визуал", "ui", "ux", "графическ", "отрисовк", "рендер", "мокап", "типографик"]),
-    ("Разработка", ["разработ", "программист", "python", "javascript", "react", "vue", "php", "laravel", "бот", "telegram", "api", "фронтенд", "бэкенд", "fullstack", "devops", "сайт", "приложен", "crm", "битрикс", "1с", "wordpress", "tilda", "код", "скрипт", "баз данных", "sql", "парсинг", "автоматизац", "unity", "unreal"]),
-    ("Контент", ["текст", "копирайт", "контент", "стат", "написа", "seo", "редактур", "корректур", "перевод", "расшифровк", "транскрибац", "сценари", "раскадровк"]),
-    ("Маркетинг", ["smm", "реклам", "таргет", "маркетинг", "продвижен", "трафик", "лидогенерац", "воронк", "контекст", "яндекс директ", "google ads", "медиа", "пиар"]),
-    ("Видео", ["видео", "монтаж", "анимац", "моушн", "рилс", "reels", "youtube", "клип", "озвучк", "аудио", "подкаст"]),
-    ("Аудит", ["аудит", "тестирован", "qa", "аналитик", "оптимизац", "консалтинг", "анализ"]),
+    ("🎨 Дизайн", ["дизайн", "figma", "photoshop", "логотип", "иллюстрац", "баннер", "креатив", "фирменный стиль", "айдентика", "брендинг", "полиграф", "верстк", "ретуш", "визуал", "ui", "ux", "графическ", "отрисовк", "рендер", "мокап", "типографик"]),
+    ("💻 Разработка", ["разработ", "программист", "python", "javascript", "react", "vue", "php", "laravel", "бот", "telegram", "api", "фронтенд", "бэкенд", "fullstack", "devops", "сайт", "приложен", "crm", "битрикс", "1с", "wordpress", "tilda", "код", "скрипт", "баз данных", "sql", "парсинг", "автоматизац", "unity", "unreal"]),
+    ("✍️ Контент", ["текст", "копирайт", "контент", "стат", "написа", "seo", "редактур", "корректур", "перевод", "расшифровк", "транскрибац", "сценари", "раскадровк"]),
+    ("📢 Маркетинг", ["smm", "реклам", "таргет", "маркетинг", "продвижен", "трафик", "лидогенерац", "воронк", "контекст", "яндекс директ", "google ads", "медиа", "пиар"]),
+    ("🎬 Видео", ["видео", "монтаж", "анимац", "моушн", "рилс", "reels", "youtube", "клип", "озвучк", "аудио", "подкаст"]),
+    ("📋 Аудит", ["аудит", "тестирован", "qa", "аналитик", "оптимизац", "консалтинг", "анализ"]),
 ]
+
+CATEGORY_EMOJI = {rule[0]: rule[0] for rule in CATEGORY_RULES}
 
 def detect_category(title, desc):
     text = (title + " " + desc).lower()
-    best_cat = "Фриланс"
+    best_cat = "💼 Фриланс"
     best_score = 0
     for cat, keywords in CATEGORY_RULES:
         score = sum(1 for kw in keywords if kw in text)
@@ -298,10 +300,31 @@ def clean_budget(budget_str):
 
 
 def clean_desc(desc, max_len=150):
+    """Extract one solid sentence describing the work."""
     d = desc.strip()
-    if len(d) > max_len:
-        d = d[:max_len].rsplit(' ', 1)[0] + "..."
-    return d
+    # Remove common noise
+    d = re.sub(r'^(нужно|необходимо|требуется|задача|ищем)\s+', '', d, flags=re.IGNORECASE)
+    d = re.sub(r'<[^>]+>', '', d)
+    d = ' '.join(d.split())  # Normalize whitespace
+    
+    # Try to get a full sentence ending with .!?
+    sentences = re.split(r'(?<=[.!?])\s+', d)
+    result = ""
+    for s in sentences:
+        candidate = (result + " " + s).strip()
+        if len(candidate) <= max_len:
+            result = candidate
+        else:
+            break
+    
+    if not result:
+        result = d[:max_len].rsplit(' ', 1)[0] + "..."
+    
+    # If we have a very short result, combine sentences
+    if len(result) < 40 and len(sentences) > 1:
+        result = (sentences[0] + " " + sentences[1]).strip()[:max_len]
+    
+    return result
 
 
 MONTHS_RU = ["", "ЯНВАРЯ", "ФЕВРАЛЯ", "МАРТА", "АПРЕЛЯ", "МАЯ", "ИЮНЯ",
@@ -313,21 +336,14 @@ def format_post(projects, now):
     
     lines = [
         f"📆 {date_str}",
-        "<b>🔥 Вакансии на фрилансе — только с оплатой</b>",
+        "<b>🔥 Вакансии для фрилансеров</b>",
         ""
     ]
     
     for p in projects[:3]:
         cat = detect_category(p["title"], p.get("description", ""))
-        cat_line = f"│  {cat}  │"
-        box_top = "┌" + "─" * (len(cat_line) - 2) + "┐"
-        box_bot = "└" + "─" * (len(cat_line) - 2) + "┘"
         
-        lines.append(f"<code>{box_top}</code>")
-        lines.append(f"<code>{cat_line}</code>")
-        lines.append(f"<code>{box_bot}</code>")
-        lines.append("")
-        
+        lines.append(cat)
         lines.append(f"<b>{p['title']}</b>")
         
         desc = clean_desc(p.get("description", ""))
@@ -339,9 +355,7 @@ def format_post(projects, now):
             lines.append(f"💰 {budget}")
         
         source = p.get("source", "")
-        lines.append(f"🔗 {p['link']}  |  {source}")
-        lines.append("")
-        lines.append("─" * 30)
+        lines.append(f"🔗 {p['link']} — {source}")
         lines.append("")
     
     lines.append("#вакансии #удаленка #фриланс")
