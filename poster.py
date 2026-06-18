@@ -266,29 +266,87 @@ def tg_send(text):
         return json.loads(r.read())
 
 
-def format_post(projects, today_str):
+# --- Category detection ---
+CATEGORY_RULES = [
+    ("Дизайн", ["дизайн", "figma", "photoshop", "логотип", "иллюстрац", "баннер", "креатив", "фирменный стиль", "айдентика", "брендинг", "полиграф", "верстк", "ретуш", "визуал", "ui", "ux", "графическ", "отрисовк", "рендер", "мокап", "типографик"]),
+    ("Разработка", ["разработ", "программист", "python", "javascript", "react", "vue", "php", "laravel", "бот", "telegram", "api", "фронтенд", "бэкенд", "fullstack", "devops", "сайт", "приложен", "crm", "битрикс", "1с", "wordpress", "tilda", "код", "скрипт", "баз данных", "sql", "парсинг", "автоматизац", "unity", "unreal"]),
+    ("Контент", ["текст", "копирайт", "контент", "стат", "написа", "seo", "редактур", "корректур", "перевод", "расшифровк", "транскрибац", "сценари", "раскадровк"]),
+    ("Маркетинг", ["smm", "реклам", "таргет", "маркетинг", "продвижен", "трафик", "лидогенерац", "воронк", "контекст", "яндекс директ", "google ads", "медиа", "пиар"]),
+    ("Видео", ["видео", "монтаж", "анимац", "моушн", "рилс", "reels", "youtube", "клип", "озвучк", "аудио", "подкаст"]),
+    ("Аудит", ["аудит", "тестирован", "qa", "аналитик", "оптимизац", "консалтинг", "анализ"]),
+]
+
+def detect_category(title, desc):
+    text = (title + " " + desc).lower()
+    best_cat = "Фриланс"
+    best_score = 0
+    for cat, keywords in CATEGORY_RULES:
+        score = sum(1 for kw in keywords if kw in text)
+        if score > best_score:
+            best_score = score
+            best_cat = cat
+    return best_cat
+
+
+def clean_budget(budget_str):
+    """Clean and normalize budget string."""
+    if not budget_str or budget_str in ("договорная", "по договоренности", "", "N/A", "по результатам собеседования"):
+        return None
+    b = budget_str.replace("&nbsp;", " ").replace("&#8381;", "₽").replace("руб", "₽")
+    b = re.sub(r'\s+', ' ', b).strip()
+    return b
+
+
+def clean_desc(desc, max_len=150):
+    d = desc.strip()
+    if len(d) > max_len:
+        d = d[:max_len].rsplit(' ', 1)[0] + "..."
+    return d
+
+
+MONTHS_RU = ["", "ЯНВАРЯ", "ФЕВРАЛЯ", "МАРТА", "АПРЕЛЯ", "МАЯ", "ИЮНЯ",
+             "ИЮЛЯ", "АВГУСТА", "СЕНТЯБРЯ", "ОКТЯБРЯ", "НОЯБРЯ", "ДЕКАБРЯ"]
+
+
+def format_post(projects, now):
+    date_str = f"{now.day} {MONTHS_RU[now.month]}"
+    
     lines = [
-        f"<b>🔥 Проверенные заказы — {today_str}</b>",
-        "", "<i>Только с нормальной оплатой. Голосуй 👇</i>", ""
+        f"📆 {date_str}",
+        "<b>🔥 Вакансии на фрилансе — только с оплатой</b>",
+        ""
     ]
-    emoji_nums = ["1️⃣","2️⃣","3️⃣"]
-    emoji_react = ["❤️","🔥","👍"]
-    for i, p in enumerate(projects):
-        desc = p.get('description','')[:100]
-        budget = p.get('budget','')
-        lines.append(f"{emoji_nums[i]} <b>{p['title']}</b>")
-        if budget and budget not in ("договорная","по договоренности","по результатам собеседования"):
-            lines.append(f"   💰 {budget}")
-        if desc: lines.append(f"   📝 {desc}")
-        source = p.get('source', '')
-        source_label = {"FL.ru": "🔹 FL.ru", "Freelance.ru": "🔹 Freelance.ru", "Kwork": "🔹 Kwork", "Habr Career": "🔹 Habr Career"}.get(source, f"🔹 {source}")
-        lines.append(f"   🔗 {p['link']}  |  {source_label}")
+    
+    for p in projects[:3]:
+        cat = detect_category(p["title"], p.get("description", ""))
+        cat_line = f"│  {cat}  │"
+        box_top = "┌" + "─" * (len(cat_line) - 2) + "┐"
+        box_bot = "└" + "─" * (len(cat_line) - 2) + "┘"
+        
+        lines.append(f"<code>{box_top}</code>")
+        lines.append(f"<code>{cat_line}</code>")
+        lines.append(f"<code>{box_bot}</code>")
         lines.append("")
-    lines.append(" ".join([f"{emoji_react[i]} — {i+1}" for i in range(len(projects))]))
-    lines.append("")
-    lines.append("<i>🔄 Перешли другу-фрилансеру — он скажет спасибо</i>")
-    lines.append("")
-    lines.append("#вакансии #фриланс #удаленка")
+        
+        lines.append(f"<b>{p['title']}</b>")
+        
+        desc = clean_desc(p.get("description", ""))
+        if desc:
+            lines.append(desc)
+        
+        budget = clean_budget(p.get("budget", ""))
+        if budget:
+            lines.append(f"💰 {budget}")
+        
+        source = p.get("source", "")
+        lines.append(f"🔗 {p['link']}  |  {source}")
+        lines.append("")
+        lines.append("─" * 30)
+        lines.append("")
+    
+    lines.append("#вакансии #удаленка #фриланс")
+    lines.append("⏩ Поделиться с другом — @hey_freelancer")
+    
     return "\n".join(lines)
 
 
@@ -326,7 +384,7 @@ def main():
 
     # Take top 3
     top = new_projects[:MAX_PER_POST]
-    text = format_post(top, today_str)
+    text = format_post(top, now)
 
     # Post to Telegram
     result = tg_send(text)
